@@ -578,13 +578,15 @@ def process_pipeline(youtube_url, uploaded_video_path, target_lang_name, burn_su
 
     yield "Performing Final Video Mix...", None
     final_video_output = f"{data_dir}/ULTIMATE_DUBBED_VIDEO.mp4"
-    # We render the pre-baked ASS file with ffmpeg's `ass` filter (no
-    # force_style acrobatics needed since the .ass already carries the style).
+    # Render our pre-baked ASS file. We use the `subtitles=` filter (which
+    # natively supports .ass) rather than `ass=`, because some ffmpeg builds
+    # have a bug in `ass=` where a single cue with an end time past the end
+    # of the video gets "stuck" on the last frame for the entire duration.
     if burn_subtitles:
-        # ass= filter: colon in the path needs escaping -> replace ':' with '\\:'
-        # and the backslashes with '\\' for ffmpeg's option parser.
-        ass_path_escaped = subs_path.replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
-        subtitle_filter = f"-vf \"ass={ass_path_escaped}\""
+        # Use the simple form (no force_style, no escaping) — the .ass itself
+        # already carries FontSize, Alignment, BorderStyle, etc.
+        # subtitles= also auto-escapes Windows/Unix path separators internally.
+        subtitle_filter = f"-vf \"subtitles='{subs_path}'\""
         video_codec = "-c:v libx264 -preset ultrafast"
     else:
         subtitle_filter = ""
