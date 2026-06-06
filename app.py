@@ -1,4 +1,4 @@
-\import gradio as gr
+import gradio as gr
 import os
 os.environ["COQUI_TOS_AGREED"] = "1"
 import json
