@@ -1,0 +1,24 @@
+services:
+  ai_studio:
+    build: .
+    container_name: dub_monolith
+    environment:
+      - PYTHONUNBUFFERED=1
+      - HF_HOME=/app/data/models_cache/hf
+      - TTS_HOME=/app/data/models_cache/tts
+      - COQUI_TOS_AGREED=1
+      - GRADIO_ANALYTICS_ENABLED=False
+      - MKL_THREADING_LAYER=GNU
+      - MKL_SERVICE_FORCE_INTEL=1
+      - HF_TOKEN=
+    ports:
+      - "8060:8060"
+    volumes:
+      - ./data:/app/data
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [ gpu ]

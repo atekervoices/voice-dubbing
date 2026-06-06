@@ -1,0 +1,20 @@
+--extra-index-url https://download.pytorch.org/whl/cu121
+torch==2.5.1
+numpy<2.0
+transformers==4.40.0
+huggingface-hub==0.22.2
+demucs
+pydub
+noisereduce
+scipy
+gradio==3.50.2
+fastapi==0.99.1
+yt-dlp
+fugashi
+unidic-lite
+jieba
+pypinyin
+jamo
+cutlet
+mecab-python3
+requests

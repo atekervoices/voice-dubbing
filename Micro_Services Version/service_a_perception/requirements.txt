@@ -1,0 +1,7 @@
+numpy<2.0
+demucs
+fastapi
+uvicorn
+pydantic
+requests
+pydub
