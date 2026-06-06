@@ -11,6 +11,13 @@ services:
       - MKL_THREADING_LAYER=GNU
       - MKL_SERVICE_FORCE_INTEL=1
       - HF_TOKEN=
+      # OpenAI-compatible translation (used in Phase 2). Set OPENAI_API_KEY to a real
+      # key to enable translation. The other two are optional and default sensibly.
+      - OPENAI_API_KEY=
+      - OPENAI_BASE_URL=https://api.openai.com
+      - OPENAI_MODEL=gpt-4o-mini
+      # Tame CUDA fragmentation for the demucs XTTS call
+      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
     ports:
       - "8060:8060"
     volumes:
