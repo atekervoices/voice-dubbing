@@ -1,4 +1,4 @@
-import gradio as gr
+\import gradio as gr
 import os
 os.environ["COQUI_TOS_AGREED"] = "1"
 import json
@@ -117,8 +117,8 @@ LANGUAGE_MAP = [
     "Ateso",
 ]
 
-def run_extraction(video_filename: str):
-    print(f"\nPhase 1: Extraction & Diarization for {video_filename}")
+def run_extraction(video_filename: str, num_speakers: int = 5):
+    print(f"\nPhase 1: Extraction & Diarization for {video_filename} (num_speakers={num_speakers})")
     data_dir = "./data"
     video_path = f"{data_dir}/{video_filename}"
     raw_audio_path = f"{data_dir}/raw_audio.wav"
@@ -138,7 +138,7 @@ def run_extraction(video_filename: str):
     with open(clean_vocal_path, 'rb') as audio_file:
         files = {'file': (os.path.basename(clean_vocal_path), audio_file, 'audio/wav')}
         data = {
-            'num_speakers': '5',
+            'num_speakers': str(int(num_speakers)),
             'language': 'eng'
         }
         
@@ -282,7 +282,7 @@ def format_timestamp(seconds: float) -> str:
     h = m // 60
     return f"{h:02d}:{m%60:02d}:{s%60:02d},{ms:03d}"
 
-def process_pipeline(youtube_url, uploaded_video_path, target_lang_name, burn_subtitles,
+def process_pipeline(youtube_url, uploaded_video_path, target_lang_name, burn_subtitles, num_speakers,
                      whisper_model_choice="large-v3", xtts_temperature=0.65, max_atempo=1.5,
                      silence_floor=-38, min_slot_ms=50,
                      normalize_audio=True, target_volume=-16.0, noise_reduction=15, high_pass=80, low_pass=10000):
@@ -329,7 +329,7 @@ def process_pipeline(youtube_url, uploaded_video_path, target_lang_name, burn_su
         
     yield "Phase 1: High-Fidelity Audio Extraction...", None
     try:
-        transcript_path = run_extraction("source_video.mp4")
+        transcript_path = run_extraction("source_video.mp4", num_speakers=num_speakers)
     except Exception as e:
         yield f"FAILED: Processing error during extraction: {e}", None
         return
@@ -1001,6 +1001,7 @@ with gr.Blocks(theme=custom_theme, css=css) as ui:
                 with gr.Row():
                     target_lang = gr.Dropdown(choices=LANGUAGE_MAP, value="English", label="Target Language", interactive=True, filterable=False)
                     burn_subs = gr.Checkbox(label="Burn Subtitles", value=True)
+                num_speakers = gr.Slider(minimum=1, maximum=10, value=3, step=1, label="Number of Speakers", info="Hint to the diarization model about how many distinct speakers to expect.")
 
             # Advanced
             with gr.Accordion("⚙  Advanced Engine Settings", open=False):
@@ -1050,7 +1051,7 @@ with gr.Blocks(theme=custom_theme, css=css) as ui:
     # ═══ EVENTS ═════════════════════════════════
     btn.click(
         fn=process_pipeline,
-        inputs=[yt_url, vid_in, target_lang, burn_subs,
+        inputs=[yt_url, vid_in, target_lang, burn_subs, num_speakers,
                 whisper_choice, xtts_temp, atempo_max, sil_floor, min_slot,
                 normalize_audio, target_volume, noise_reduction, high_pass, low_pass],
         outputs=[status_out, vid_out]

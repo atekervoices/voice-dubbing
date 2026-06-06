@@ -4,6 +4,8 @@ torchaudio==2.5.1
 numpy<2.0
 transformers==4.40.0
 huggingface-hub==0.22.2
+sentencepiece
+protobuf
 demucs==4.0.1
 pydub
 noisereduce
