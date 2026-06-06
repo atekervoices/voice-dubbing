@@ -282,16 +282,12 @@ def format_timestamp(seconds: float) -> str:
     h = m // 60
     return f"{h:02d}:{m%60:02d}:{s%60:02d},{ms:03d}"
 
-def process_pipeline(youtube_url, uploaded_video_path, target_lang_name, burn_subtitles, hf_user_token,
+def process_pipeline(youtube_url, uploaded_video_path, target_lang_name, burn_subtitles,
                      whisper_model_choice="large-v3", xtts_temperature=0.65, max_atempo=1.5,
                      silence_floor=-38, min_slot_ms=50,
                      normalize_audio=True, target_volume=-16.0, noise_reduction=15, high_pass=80, low_pass=10000):
     yield "Initializing Pipeline...", None
 
-    if not hf_user_token or str(hf_user_token).strip() == "":
-        yield "❌ SECURITY HALT: You must provide your Hugging Face Access Token!", None
-        return
-    
     data_dir = "./data"
     
     yield "Purging old video data (Safeguarding models)...", None
@@ -1002,7 +998,6 @@ with gr.Blocks(theme=custom_theme, css=css) as ui:
             # Configuration
             with gr.Column(elem_classes="card delay-2"):
                 gr.HTML("""<div class="card-title"><span class="card-icon-wrap"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg></span> Configuration</div>""")
-                hf_token = gr.Textbox(label="Hugging Face Token", type="password", placeholder="hf_••••••••••••", lines=1)
                 with gr.Row():
                     target_lang = gr.Dropdown(choices=LANGUAGE_MAP, value="English", label="Target Language", interactive=True, filterable=False)
                     burn_subs = gr.Checkbox(label="Burn Subtitles", value=True)
@@ -1055,7 +1050,7 @@ with gr.Blocks(theme=custom_theme, css=css) as ui:
     # ═══ EVENTS ═════════════════════════════════
     btn.click(
         fn=process_pipeline,
-        inputs=[yt_url, vid_in, target_lang, burn_subs, hf_token,
+        inputs=[yt_url, vid_in, target_lang, burn_subs,
                 whisper_choice, xtts_temp, atempo_max, sil_floor, min_slot,
                 normalize_audio, target_volume, noise_reduction, high_pass, low_pass],
         outputs=[status_out, vid_out]
