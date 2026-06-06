@@ -394,22 +394,41 @@ def process_pipeline(youtube_url, uploaded_video_path, target_lang_name, burn_su
         start_ms, end_ms = int(info["start"] * 1000), int(info["end"] * 1000)
         ref_path = f"{data_dir}/ref_{spk}.wav"
         clean_vocals[start_ms:end_ms].export(ref_path, format="wav")
+        # The deployed XTTS clone API expects 16kHz / 16-bit / mono PCM.
+        # pydub keeps the source's frame_rate / sample_width; re-encode to be safe.
+        try:
+            ref_seg = AudioSegment.from_wav(ref_path)
+            ref_seg = ref_seg.set_channels(1).set_frame_rate(16000).set_sample_width(2)
+            ref_seg.export(ref_path, format="wav")
+            print(f"  [REF] Wrote 16kHz/mono/16-bit reference for {spk} -> {ref_path}")
+        except Exception as e:
+            print(f"  [REF] Could not re-encode reference for {spk}: {e}")
 
     total_duration_ms = int(data[-1]["end"] * 1000) + 15000 
     master_dub_audio = AudioSegment.silent(duration=total_duration_ms)
 
     xtts_lang_code = "en"
 
-    def generate_tts_via_api(text: str, reference_audio_path: str, language: str, temperature: float, output_path: str):
-        """Generate TTS using the deployed API service."""
-        files = {'reference_audio': open(reference_audio_path, 'rb')}
-        data = {'text': text, 'temperature': temperature}
+    def generate_tts_via_api(text: str, reference_audio_path: str, language: str, temperature: float, output_path: str) -> bool:
+        """Generate TTS using the deployed API service. Returns True on success."""
+        if not text or not text.strip():
+            print(f"  [TTS] Skipping empty text for {output_path}")
+            return False
+        if not os.path.exists(reference_audio_path):
+            print(f"  [TTS] Reference audio missing: {reference_audio_path}")
+            return False
         try:
-            response = requests.post(TTS_API_URL, files=files, data=data, stream=True)
-            response.raise_for_status()
+            with open(reference_audio_path, 'rb') as ref_fh:
+                files = {'reference_audio': (os.path.basename(reference_audio_path), ref_fh, 'audio/wav')}
+                data  = {'text': text, 'temperature': str(temperature), 'language': language}
+                print(f"  [TTS] POST -> {TTS_API_URL}  text='{text[:60]}...'  ref={os.path.basename(reference_audio_path)}")
+                response = requests.post(TTS_API_URL, files=files, data=data, timeout=120)
+                response.raise_for_status()
             raw_audio_data = bytearray()
             for chunk in response.iter_content(chunk_size=8192):
-                raw_audio_data.extend(chunk)
+                if chunk:
+                    raw_audio_data.extend(chunk)
+            print(f"  [TTS] Received {len(raw_audio_data)} bytes")
             if not raw_audio_data:
                 return False
             with wave.open(output_path, 'wb') as wf:
@@ -417,37 +436,46 @@ def process_pipeline(youtube_url, uploaded_video_path, target_lang_name, burn_su
                 wf.writeframes(raw_audio_data)
             return True
         except Exception as e:
-            print(f"TTS API error: {e}")
+            print(f"  [TTS] API error: {e}")
             return False
-        finally:
-            files['reference_audio'].close()
 
     import wave
 
+    successful_tts = 0
     for i, line in enumerate(data):
         yield f"Generating dialogue block {i+1}/{len(data)}...", None
         spk = line["speaker"]
-        translated_text = line["translated_text"]
+        translated_text = line.get("translated_text", "").strip()
         actual_start_ms = int(line["start"] * 1000)
+        target_duration_ms = max(800, int((line["end"] - line["start"]) * 1000))
         current_ref = f"{data_dir}/ref_{spk}.wav"
         raw_path = f"{data_dir}/raw_line_{i}.wav"
-        if not generate_tts_via_api(text=translated_text, reference_audio_path=current_ref, language=xtts_lang_code, temperature=xtts_temperature, output_path=raw_path):
-            yield f"FAILED: TTS generation failed for block {i+1}", None
-            return
-        filter_chain = []
-        if high_pass > 0: filter_chain.append(f"highpass=f={high_pass}")
-        if low_pass < 15000: filter_chain.append(f"lowpass=f={low_pass}")
-        if noise_reduction > 0: filter_chain.append(f"afftdn=nr={noise_reduction}")
-        if filter_chain:
-            filtered_path = f"{data_dir}/filtered_line_{i}.wav"
-            af_val = ",".join(filter_chain)
-            os.system(f"/usr/bin/ffmpeg -i {raw_path} -af \"{af_val}\" {filtered_path} -y -loglevel error")
-            temp_audio = AudioSegment.from_wav(filtered_path)
+        ok = generate_tts_via_api(text=translated_text, reference_audio_path=current_ref, language=xtts_lang_code, temperature=xtts_temperature, output_path=raw_path)
+        if not ok:
+            print(f"  [TTS] Block {i+1}: no audio produced, inserting {target_duration_ms}ms of silence.")
+            segment_audio = AudioSegment.silent(duration=target_duration_ms)
         else:
-            temp_audio = AudioSegment.from_wav(raw_path)
-        nonsilent_ranges = detect_nonsilent(temp_audio, min_silence_len=50, silence_thresh=silence_floor)
-        trimmed_audio = temp_audio[nonsilent_ranges[0][0]:nonsilent_ranges[-1][1]] if nonsilent_ranges else temp_audio
-        if normalize_audio and trimmed_audio.dBFS != float('-inf'):
+            successful_tts += 1
+            try:
+                segment_audio = AudioSegment.from_wav(raw_path)
+            except Exception as e:
+                print(f"  [TTS] Failed to read back {raw_path}: {e} - using silence")
+                segment_audio = AudioSegment.silent(duration=target_duration_ms)
+            filter_chain = []
+            if high_pass > 0: filter_chain.append(f"highpass=f={high_pass}")
+            if low_pass < 15000: filter_chain.append(f"lowpass=f={low_pass}")
+            if noise_reduction > 0: filter_chain.append(f"afftdn=nr={noise_reduction}")
+            if filter_chain:
+                filtered_path = f"{data_dir}/filtered_line_{i}.wav"
+                af_val = ",".join(filter_chain)
+                os.system(f"/usr/bin/ffmpeg -i {raw_path} -af \"{af_val}\" {filtered_path} -y -loglevel error")
+                try:
+                    segment_audio = AudioSegment.from_wav(filtered_path)
+                except Exception:
+                    pass
+        nonsilent_ranges = detect_nonsilent(segment_audio, min_silence_len=50, silence_thresh=silence_floor)
+        trimmed_audio = segment_audio[nonsilent_ranges[0][0]:nonsilent_ranges[-1][1]] if nonsilent_ranges else segment_audio
+        if normalize_audio and len(trimmed_audio) > 0 and trimmed_audio.dBFS != float('-inf'):
             change_in_dBFS = target_volume - trimmed_audio.dBFS
             if change_in_dBFS < 20.0:
                 trimmed_audio = trimmed_audio.apply_gain(change_in_dBFS)
@@ -463,11 +491,16 @@ def process_pipeline(youtube_url, uploaded_video_path, target_lang_name, burn_su
             temp_in = f"{data_dir}/temp_squish_in.wav"; temp_out = f"{data_dir}/temp_squish_out.wav"
             trimmed_audio.export(temp_in, format="wav")
             os.system(f"/usr/bin/ffmpeg -i {temp_in} -filter:a atempo={safe_ratio} {temp_out} -y -loglevel error")
-            trimmed_audio = AudioSegment.from_wav(temp_out)
+            try:
+                trimmed_audio = AudioSegment.from_wav(temp_out)
+            except Exception:
+                pass
             if len(trimmed_audio) > max_safe_duration_ms:
                 trimmed_audio = trimmed_audio[:max_safe_duration_ms].fade_out(100)
         trimmed_audio = trimmed_audio.fade_in(30).fade_out(30)
         master_dub_audio = master_dub_audio.overlay(trimmed_audio, position=actual_start_ms)
+
+    print(f"Phase 3 complete. TTS succeeded for {successful_tts}/{len(data)} blocks. Falling back to silence for the rest.")
 
     master_dub_audio = master_dub_audio[:len(base_audio)]
     dub_only_path = f"{data_dir}/final_dub_SYNCED.wav"
