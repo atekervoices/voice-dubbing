@@ -514,10 +514,19 @@ def process_pipeline(youtube_url, uploaded_video_path, target_lang_name, burn_su
 
     yield "Performing Final Video Mix...", None
     final_video_output = f"{data_dir}/ULTIMATE_DUBBED_VIDEO.mp4"
+    # Style hint for ffmpeg's `subtitles` filter. Without this, subtitles render in
+    # an enormous blocky font that can cover the whole frame. force_style keeps
+    # each cue small, bottom-center, and word-wrapped.
+    SUB_STYLE = (
+        "FontName=Arial,FontSize=18,PrimaryColour=&H00FFFFFF&,OutlineColour=&H00000000&,"
+        "BackColour=&H80000000&,BorderStyle=4,Outline=1,Shadow=0,Alignment=2,MarginV=24"
+    )
     if burn_subtitles:
-        subtitle_filter = f"-vf \"subtitles={subs_path}\""; video_codec = "-c:v libx264 -preset ultrafast"
+        subtitle_filter = f"-vf \"subtitles={subs_path}:force_style='{SUB_STYLE}'\""
+        video_codec = "-c:v libx264 -preset ultrafast"
     else:
-        subtitle_filter = ""; video_codec = "-c:v copy"
+        subtitle_filter = ""
+        video_codec = "-c:v copy"
     os.system(f"""/usr/bin/ffmpeg -i {shared_video_path} -i {dub_only_path} -i {background_path} -filter_complex "[1:a][2:a]amix=inputs=2:duration=first[aout]" -map 0:v -map "[aout]" {subtitle_filter} {video_codec} -c:a aac -b:a 192k {final_video_output} -y -loglevel error""")
     gc.collect(); torch.cuda.empty_cache()
     yield "PROJECT COMPLETE! Video is Ready.", final_video_output
