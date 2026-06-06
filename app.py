@@ -363,13 +363,72 @@ def process_pipeline(youtube_url, uploaded_video_path, target_lang_name, burn_su
     with open(translated_json_path, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    subs_path = f"{data_dir}/subs.srt"
+    subs_path = f"{data_dir}/subs.ass"
     if burn_subtitles:
-        with open(subs_path, "w", encoding="utf-8") as srt_file:
+        # Pre-roll an ASS file with a PlayRes matching the source video so the
+        # renderer doesn't have to guess. We then hard-wrap every cue to a safe
+        # character width so we never overflow the bottom of the frame.
+        try:
+            import subprocess as _sp
+            probe = _sp.run(
+                ["/usr/bin/ffprobe", "-v", "error", "-select_streams", "v:0",
+                 "-show_entries", "stream=width,height", "-of", "csv=p=0", shared_video_path],
+                capture_output=True, text=True, timeout=10
+            )
+            w_h = probe.stdout.strip().split(",")
+            vid_w, vid_h = int(w_h[0]), int(w_h[1])
+        except Exception:
+            vid_w, vid_h = 1080, 1920
+        # Cap text to ~3 short lines / ~50 chars per line for safety.
+        MAX_CHARS_PER_LINE = 50
+        MAX_LINES = 3
+        def wrap_for_ass(text: str) -> str:
+            if not text:
+                return ""
+            words = text.split()
+            lines, current = [], ""
+            for w in words:
+                # Hard break if adding this word would exceed the line width.
+                if current and len(current) + 1 + len(w) > MAX_CHARS_PER_LINE:
+                    lines.append(current)
+                    current = w
+                else:
+                    current = (current + " " + w).strip()
+            if current:
+                lines.append(current)
+            return "\\N".join(lines[:MAX_LINES])
+        ass_header = (
+            "[Script Info]\n"
+            f"PlayResX: {vid_w}\nPlayResY: {vid_h}\n"
+            "ScaledBorderAndShadow: yes\n"
+            "WrapStyle: 2\n\n"
+            "[V4+ Styles]\n"
+            "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, "
+            "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, "
+            "ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
+            "Alignment, MarginL, MarginR, MarginV, Encoding\n"
+            "Style: Default,Arial,12,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,"
+            "0,0,0,0,100,100,0,0,1,1,0,2,30,30,30,1\n\n"
+            "[Events]\n"
+            "Format: Layer, Start, End, Style, Name, MarginL, MarginR, "
+            "MarginV, Effect, Text\n"
+        )
+        def ass_time(t: float) -> str:
+            h = int(t // 3600); t -= h * 3600
+            m = int(t // 60);   t -= m * 60
+            s = int(t)
+            cs = int(round((t - s) * 100))
+            return f"{h:d}:{m:02d}:{s:02d}.{cs:02d}"
+        with open(subs_path, "w", encoding="utf-8") as ass_file:
+            ass_file.write(ass_header)
             for idx, line in enumerate(data):
-                start_str = format_timestamp(line["start"])
-                end_str = format_timestamp(line["end"])
-                srt_file.write(f"{idx+1}\n{start_str} --> {end_str}\n{line['translated_text']}\n\n")
+                txt = wrap_for_ass(line.get("translated_text", ""))
+                if not txt:
+                    continue
+                ass_file.write(
+                    f"Dialogue: 0,{ass_time(line['start'])},{ass_time(line['end'])},"
+                    f"Default,,0,0,,{txt}\n"
+                )
 
     base_audio_path = f"{data_dir}/base_audio.wav"
     os.system(f"/usr/bin/ffmpeg -i {shared_video_path} -vn -acodec pcm_s16le -ar 22050 -ac 1 {base_audio_path} -y -loglevel error")
@@ -515,11 +574,14 @@ def process_pipeline(youtube_url, uploaded_video_path, target_lang_name, burn_su
     yield "Performing Final Video Mix...", None
     final_video_output = f"{data_dir}/ULTIMATE_DUBBED_VIDEO.mp4"
     # Style hint for ffmpeg's `subtitles` filter. Without this, subtitles render in
-    # an enormous blocky font that can cover the whole frame. force_style keeps
-    # each cue small, bottom-center, and word-wrapped.
+    # an enormous blocky font that spills off the right edge of the frame.
+    # We pick a small font, tight margins, and an explicit WrapStyle=2 so long
+    # lines wrap to the next line (and stay inside the video width).
     SUB_STYLE = (
-        "FontName=Arial,FontSize=18,PrimaryColour=&H00FFFFFF&,OutlineColour=&H00000000&,"
-        "BackColour=&H80000000&,BorderStyle=4,Outline=1,Shadow=0,Alignment=2,MarginV=24"
+        "FontName=Arial,FontSize=12,"
+        "PrimaryColour=&H00FFFFFF&,OutlineColour=&H00000000&,"
+        "BackColour=&H80000000&,BorderStyle=4,Outline=1,Shadow=0,"
+        "Alignment=2,MarginL=20,MarginR=20,MarginV=20,WrapStyle=2"
     )
     if burn_subtitles:
         subtitle_filter = f"-vf \"subtitles={subs_path}:force_style='{SUB_STYLE}'\""
