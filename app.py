@@ -379,8 +379,10 @@ def process_pipeline(youtube_url, uploaded_video_path, target_lang_name, burn_su
             vid_w, vid_h = int(w_h[0]), int(w_h[1])
         except Exception:
             vid_w, vid_h = 1080, 1920
-        # Cap text to ~3 short lines / ~50 chars per line for safety.
-        MAX_CHARS_PER_LINE = 50
+        # Cap text to ~3 short lines. We pick a wide line budget so the captions
+        # are large and readable, then rely on the hard 3-line cap to keep them
+        # out of the speaker's face.
+        MAX_CHARS_PER_LINE = 70
         MAX_LINES = 3
         def wrap_for_ass(text: str) -> str:
             if not text:
@@ -407,8 +409,11 @@ def process_pipeline(youtube_url, uploaded_video_path, target_lang_name, burn_su
             "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, "
             "ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
             "Alignment, MarginL, MarginR, MarginV, Encoding\n"
-            "Style: Default,Arial,12,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,"
-            "0,0,0,0,100,100,0,0,1,1,0,2,30,30,30,1\n\n"
+            # Fontsize 28 keeps the text comfortably readable on 1080-wide phones
+            # and laptops without becoming screen-filling. Outline=2 + a dark
+            # semi-transparent back box (BorderStyle=4) make it legible on any frame.
+            "Style: Default,Arial,28,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,"
+            "0,0,0,0,100,100,0,0,4,2,0,2,40,40,50,1\n\n"
             "[Events]\n"
             "Format: Layer, Start, End, Style, Name, MarginL, MarginR, "
             "MarginV, Effect, Text\n"
@@ -573,18 +578,13 @@ def process_pipeline(youtube_url, uploaded_video_path, target_lang_name, burn_su
 
     yield "Performing Final Video Mix...", None
     final_video_output = f"{data_dir}/ULTIMATE_DUBBED_VIDEO.mp4"
-    # Style hint for ffmpeg's `subtitles` filter. Without this, subtitles render in
-    # an enormous blocky font that spills off the right edge of the frame.
-    # We pick a small font, tight margins, and an explicit WrapStyle=2 so long
-    # lines wrap to the next line (and stay inside the video width).
-    SUB_STYLE = (
-        "FontName=Arial,FontSize=12,"
-        "PrimaryColour=&H00FFFFFF&,OutlineColour=&H00000000&,"
-        "BackColour=&H80000000&,BorderStyle=4,Outline=1,Shadow=0,"
-        "Alignment=2,MarginL=20,MarginR=20,MarginV=20,WrapStyle=2"
-    )
+    # We render the pre-baked ASS file with ffmpeg's `ass` filter (no
+    # force_style acrobatics needed since the .ass already carries the style).
     if burn_subtitles:
-        subtitle_filter = f"-vf \"subtitles={subs_path}:force_style='{SUB_STYLE}'\""
+        # ass= filter: colon in the path needs escaping -> replace ':' with '\\:'
+        # and the backslashes with '\\' for ffmpeg's option parser.
+        ass_path_escaped = subs_path.replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
+        subtitle_filter = f"-vf \"ass={ass_path_escaped}\""
         video_codec = "-c:v libx264 -preset ultrafast"
     else:
         subtitle_filter = ""
